@@ -122,8 +122,8 @@ order**, with slot 0's dot drawn larger so the orb always shows which way is up.
 <sub>The icon grows 1.5× and gains a plate. The name appears in the middle.</sub>
 </td>
 <td width="50%" align="center">
-<img src="assets/wheel-light.png" alt="Dark glass tint">
-<br><b>Dark glass</b><br>
+<img src="assets/wheel-light.png" alt="Light glass tint">
+<br><b>Light glass</b><br>
 <sub>Glass opacity and tint are both adjustable.</sub>
 </td>
 </tr>

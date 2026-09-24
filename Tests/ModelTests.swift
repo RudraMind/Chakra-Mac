@@ -55,9 +55,9 @@ func runModelTests() {
                     "a . segment is resolved")
         // The filesystem, not the string, decides identity: a case variant on a
         // case-insensitive volume is the same file. Skipped where it is not.
-        let lowered = "/applications/slack.app"
+        let lowered = "/system/applications/calendar.app"
         if FileManager.default.fileExists(atPath: lowered) {
-            expectEqual(RingItem.normalizePath(lowered), canonical,
+            expectEqual(RingItem.normalizePath(lowered), "/System/Applications/Calendar.app",
                         "a case variant resolves to the real name")
         }
         // A symlinked ancestor is resolved, so two spellings of the same folder do
