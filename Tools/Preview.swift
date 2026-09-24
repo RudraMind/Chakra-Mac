@@ -11,7 +11,7 @@ import AppKit
 @main
 struct Preview {
     // Only apps that ship with macOS, so any Mac (and the CI runner) renders the same wheel.
-    static let apps = ["/Applications/Safari.app",
+    static let apps = ["/System/Applications/FaceTime.app",
                        "/System/Applications/Mail.app",
                        "/System/Applications/Calendar.app",
                        "/System/Applications/Utilities/Terminal.app",
