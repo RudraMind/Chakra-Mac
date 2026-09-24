@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Nothing here writes anything. Stated explicitly rather than inheriting the
+# repository default, which is often read-write — and this workflow runs project
+# shell scripts, including on pull requests from forks.
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test on macOS
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          swiftc --version
+          xcodebuild -version
+
+      # Every script uses -warnings-as-errors, so a warning fails this step.
+      - name: Build (universal)
+        run: ./build.sh
+
+      - name: Confirm the app bundle was produced
+        run: |
+          test -d build/Chakra.app || { echo "::error::build/Chakra.app missing"; exit 1; }
+          echo "--- architectures ---"
+          lipo -archs build/Chakra.app/Contents/MacOS/Chakra
+          echo "--- signature ---"
+          codesign -dv build/Chakra.app 2>&1 | head -5
+
+      # 2,136 pure-logic checks. No window server required.
+      - name: Test
+        run: ./run-tests.sh
+
+      # Renders the wheel to PNG with no window. A cheap guard that the drawing
+      # path still works headlessly.
+      - name: Render preview images
+        run: ./render-preview.sh
+
+      # Packaging is checked on every push, not only at release time. A disk
+      # image that fails to build is far cheaper to find here than on the day a
+      # release is meant to go out. make-dmg.sh runs `hdiutil verify` itself.
+      - name: Package the disk image
+        run: |
+          ./make-dmg.sh
+          test -f build/Chakra.dmg || { echo "::error::build/Chakra.dmg missing"; exit 1; }
+
+      # Prove the image actually mounts and contains what it should. hdiutil
+      # verify checks the checksum; it does not check the contents.
+      - name: Mount the image and check its contents
+        # `shell: bash` is required, not cosmetic. The default shell for `run:`
+        # is `bash -e {0}` with NO pipefail, so in
+        #   MP=$(hdiutil attach ... | grep ... | sed ...)
+        # the assignment takes sed's exit status. A failed `hdiutil attach`
+        # therefore does not stop the step; it produces an empty $MP and the log
+        # blames `ls` instead, sending whoever reads it in the wrong direction.
+        # `shell: bash` runs `bash --noprofile --norc -eo pipefail {0}`.
+        shell: bash
+        run: |
+          ATTACH=$(hdiutil attach build/Chakra.dmg -nobrowse -readonly)
+          MP=$(printf '%s\n' "$ATTACH" | grep /Volumes | sed 's|.*/Volumes|/Volumes|')
+          if [ -z "$MP" ]; then
+            echo "::error::hdiutil attach produced no mount point"
+            printf '%s\n' "$ATTACH"
+            exit 1
+          fi
+          echo "mounted at $MP"
+
+          # Detach on every exit path, including a failed assertion below, so a
+          # cancelled or failing run never leaves a volume attached.
+          trap 'hdiutil detach "$MP" -force >/dev/null 2>&1 || true' EXIT
+
+          ls -la "$MP"
+          test -d "$MP/Chakra.app" \
+            || { echo "::error::Chakra.app missing from the image"; exit 1; }
+          test -L "$MP/Applications" \
+            || { echo "::error::Applications shortcut missing — the install would not be one drag"; exit 1; }
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: chakra-build-${{ github.sha }}
+          path: |
+            build/Chakra.dmg
+            build/Chakra.dmg.sha256
+            build/preview-*.png
+          retention-days: 14
+          if-no-files-found: warn
+
+# DELIBERATELY NOT RUN HERE: ./run-smoke.sh
+#
+# The smoke suite (558 checks) creates real windows and moves them. A GitHub
+# runner has no unlocked screen, so the window server refuses to move windows
+# and every orb-tuck check fails — which looks exactly like a broken animation
+# rather than a missing screen. Running it in CI would produce a permanently
+# red build that teaches everyone to ignore CI.
+#
+# Run it locally, at an unlocked screen: ./run-smoke.sh

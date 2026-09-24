@@ -1,0 +1,60 @@
+name: Feature request
+description: Suggest something Chakra should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please read this first — it will save you time.
+
+        **Four rules constrain what can be accepted**, and a request that breaks one will be
+        declined however useful it is:
+
+        1. **No macOS permission prompts.** Chakra never asks for Accessibility, Screen
+           Recording, or Automation. Anything needing a global event tap, screen capture, or
+           AppleScript is out.
+        2. **No dependencies.** No SwiftPM, no third-party code.
+        3. **No networking.** There is no network code in the project and none is planned.
+        4. **Zero warnings.** Every script uses `-warnings-as-errors`.
+
+        Also worth knowing: the outer ring always keeps at least 3 apps, because a ring with
+        one app in it is not a ring — "flick in a direction" stops meaning anything.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: >
+        Describe the situation, not the solution. The best feature is often not the one
+        first imagined.
+      placeholder: |
+        When I have twelve apps I use daily, ten outer slots is not enough, and I end up
+        editing the ring instead of launching things.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like Chakra to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: Existing settings, other apps, or macOS features that came close.
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraint check
+      description: Please confirm you have considered these.
+      options:
+        - label: This does not require any macOS permission prompt
+          required: true
+        - label: This does not require a third-party dependency
+          required: true
+        - label: This does not require a network connection
+          required: true

@@ -1,0 +1,240 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        # The example must match CFBundleShortVersionString, which is currently
+        # two components. The step below rejects a mismatch, so an example of
+        # "v1.0.0" would have guaranteed a failed run.
+        description: "Tag to release. Must match CFBundleShortVersionString exactly, e.g. v1.0"
+        required: true
+
+# All three are required, and the list must be complete.
+#
+# GitHub's documented rule: "If you specify the access for any of these
+# permissions, all of those that are not specified are set to none." So the
+# moment this block exists, anything omitted is revoked.
+#
+#   contents: write     — this job creates the Release. NOT `read`.
+#   id-token: write     — mints the OIDC token used to request a Sigstore
+#                         signing certificate for the attestation.
+#   attestations: write — persists the attestation so `gh attestation verify`
+#                         can find it later.
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    name: Build and attach the app
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Resolve version
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${INPUT_TAG:-$REF_NAME}"
+
+          # Validate before it reaches $GITHUB_OUTPUT. A multi-line or otherwise
+          # crafted value written to that file can inject additional step
+          # outputs, and this value originates from workflow_dispatch input.
+          case "$VERSION" in
+            v[0-9]*) ;;
+            *) echo "::error::Version must look like v1.0 — got '$VERSION'"; exit 1 ;;
+          esac
+          case "$VERSION" in
+            *[!v0-9.]*) echo "::error::Version may contain only digits and dots after 'v' — got '$VERSION'"; exit 1 ;;
+          esac
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION"
+
+      # A tag that disagrees with Info.plist means users cannot tell which build
+      # they are running. Fail loudly rather than shipping a mismatch.
+      - name: Check the tag matches Info.plist
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
+          TAG_VERSION="${VERSION#v}"
+          echo "Info.plist: $PLIST_VERSION"
+          echo "tag:        $TAG_VERSION"
+          if [ "$PLIST_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag $TAG_VERSION does not match CFBundleShortVersionString $PLIST_VERSION"
+            exit 1
+          fi
+
+      - name: Build (universal)
+        run: ./build.sh
+
+      - name: Test before releasing
+        run: ./run-tests.sh
+
+      # A disk image, not a zip. A zip leaves people running the app straight out
+      # of Downloads, which breaks "Open at login"; a DMG with an Applications
+      # shortcut makes the install one drag.
+      #
+      # make-dmg.sh uses only hdiutil, which ships with macOS, so this needs no
+      # setup on the runner. It also runs `hdiutil verify` on the result — an
+      # image that cannot be mounted must fail here rather than on a user's Mac.
+      - name: Package the disk image
+        id: package
+        run: |
+          ./make-dmg.sh
+          test -f build/Chakra.dmg || { echo "::error::build/Chakra.dmg missing"; exit 1; }
+          echo "dmg=build/Chakra.dmg" >> "$GITHUB_OUTPUT"
+          echo "sha=$(shasum -a 256 build/Chakra.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          ls -lh build/Chakra.dmg
+
+      # Build provenance: a Sigstore-signed statement that THIS disk image was
+      # built by THIS workflow, from THIS commit, in THIS repository. It is the
+      # only thing that ties a download back to the source, because the app
+      # bundle itself is ad-hoc signed and therefore carries no identity at all.
+      #
+      # Free on public repositories. The bundle also goes into a public
+      # transparency log, which is expected and fine for an open-source project.
+      #
+      # ORDER MATTERS, in two ways:
+      #   1. It must run AFTER the .dmg exists and after anything that rewrites
+      #      the file. An attestation binds to the artifact's SHA-256 digest, so
+      #      any later step that touches the bytes — re-signing, re-compressing,
+      #      or `xcrun stapler staple` if notarization is ever added — silently
+      #      invalidates it.
+      #   2. It must run BEFORE the Release is created. If attestation fails, the
+      #      job aborts with nothing published. The reverse order would leave a
+      #      public Release with no provenance, which is far worse to clean up.
+      #
+      # `actions/attest`, not `actions/attest-build-provenance`: as of v4 the
+      # latter is only a wrapper around this action, and GitHub's own docs no
+      # longer reference it.
+      #
+      # Pinned to the floating v4 tag rather than a commit SHA. The trade: a
+      # moved tag is trusted, but security fixes arrive without a manual bump —
+      # the right default for a project with one maintainer. To pin instead:
+      #   uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          # An explicit path, deliberately not a glob. The macOS runner's
+          # filesystem is case-insensitive, so `*.dmg` would also match
+          # `Chakra.DMG`; and a glob that matches nothing fails quietly, while a
+          # wrong explicit path fails loudly.
+          subject-path: build/Chakra.dmg
+
+      # Verify our own attestation before publishing. Without this, a broken
+      # digest would only be discovered by a user running the verify command,
+      # which is the worst possible place to learn about it.
+      - name: Verify the attestation we just made
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify build/Chakra.dmg --repo "$GITHUB_REPOSITORY"
+
+      - name: Create the GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          # Without this, a run triggered by workflow_dispatch with a tag that
+          # does not yet exist creates that tag at the DEFAULT BRANCH HEAD — not
+          # at the commit that was just built, tested and attested. The
+          # attestation would still verify, because it binds to the file's
+          # digest and never looks at the tag. The result is a release whose tag
+          # silently points somewhere other than the code it contains.
+          #
+          # GitHub's API reference for POST /repos/{owner}/{repo}/releases:
+          #   "target_commitish … Unused if the Git tag already exists.
+          #    Default: the repository's default branch."
+          target_commitish: ${{ github.sha }}
+          name: Chakra ${{ steps.version.outputs.version }}
+          # Both files. The .sha256 sidecar carries the version, which the
+          # deliberately versionless .dmg file name does not.
+          files: |
+            build/Chakra.dmg
+            build/Chakra.dmg.sha256
+          fail_on_unmatched_files: true
+          body: |
+            ## Install
+
+            1. Download **`Chakra.dmg`** below and open it.
+            2. Drag `Chakra.app` onto the **Applications** shortcut in the same window.
+            3. Eject the disk image, then launch Chakra from Applications.
+            4. **The first launch will be blocked.** macOS will refuse to open it with a dialog
+               titled **"Chakra" Not Opened**, saying *"Apple could not verify "Chakra" is free
+               of malware that may harm your Mac or compromise your privacy."* The dialog offers
+               only **Done** and **Move to Trash** — there is no Open button.
+
+               That warning is accurate. Chakra is **ad-hoc signed rather than notarized**,
+               because notarizing requires a paid Apple Developer account this project does
+               not have. Apple has not inspected the app; you are choosing to trust this
+               repository instead.
+
+               To allow it: Dismiss the block dialog with **Done**, then open **System Settings →
+               Privacy & Security**, scroll to the **Security** section, and click **"Open Anyway"**
+               beside the blocked-app notice. This button is available for about an hour after the
+               blocked launch; after that it disappears and you must retry the launch first. Confirm
+               **"Open"** in the re-prompt, then enter your login password.
+
+               You only need to do this once per build.
+
+            If you would rather not extend that trust, build it yourself — that is why the
+            build is six readable shell scripts with no dependencies.
+
+            ## Requirements
+
+            macOS 14 or later. Universal binary — Apple silicon and Intel.
+            **No permissions of any kind, and no network access.**
+
+            ## Verify the download
+
+            ```
+            shasum -a 256 ~/Downloads/Chakra.dmg
+            ```
+
+            Expected: `${{ steps.package.outputs.sha }}`
+
+            The file is named `Chakra.dmg` for every release, so the download link never
+            changes. To identify a copy you already have, open it — the window title shows
+            the version.
+
+            ## Prove this download really came from this repository
+
+            The checksum above only proves the file matches what this page says. This proves
+            something stronger — that the disk image was **built by this repository's CI from
+            this exact commit**, and could not have been substituted by anyone:
+
+            ```
+            gh attestation verify ~/Downloads/Chakra.dmg --repo ${{ github.repository }}
+            ```
+
+            Expect `✓ Verification succeeded!` and a report naming the build repository and
+            the workflow that produced it.
+
+            This is a [Sigstore](https://www.sigstore.dev/) build attestation, generated by
+            GitHub Actions. Nobody can forge it without control of this repository. Note that
+            **macOS itself does not check it** — the first-launch warning above appears
+            regardless. Only notarization removes that, and this project has no paid Apple
+            Developer account.
+
+            ## Permissions
+
+            None. Chakra never requests Accessibility, Screen Recording, or Automation, and
+            it makes no network connections. You can check the second claim yourself:
+
+            ```
+            grep -rniE "URLSession|http://|https://|CFSocket" Sources/ Tools/
+            ```
+
+            ---
+
+            Built, tested and verified by CI: 2,136 logic checks, zero warnings, and
+            `hdiutil verify` on the disk image.
