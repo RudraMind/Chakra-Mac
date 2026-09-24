@@ -9,7 +9,7 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
-## [1.0] — not yet released
+## [1.0] — 2026-09-24
 
 First public release.
 
