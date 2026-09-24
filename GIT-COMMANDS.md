@@ -4,6 +4,16 @@
 to validate and publish it is inside it. Nothing here points at another directory, another machine,
 or a skill that has to be installed. If a path in this file starts with `./`, it is in this folder.
 
+> **Status: published 2026-09-24** as the public repository `RudraMind/Chakra-Mac`. Step 0's
+> "commits AND a remote" row now applies — this runbook's first-publish steps are history.
+> The figures below were measured on 2026-09-23, before publishing. What shipped differs:
+> the six app screenshots, the two HTML mockups and their three Python generators were removed
+> (they showed the owner's personal app list), and the README images were re-rendered by CI
+> from apps that ship with macOS. The tree is now 83 files, 3,790,884 bytes; the largest file is
+> `assets/wheel-empty.png` at 899,110 bytes; `assets/` holds 7 images. CI on `macos-15` runs
+> 2136 unit checks, the preview render and the DMG build green. The 558 smoke checks were not
+> re-run after publishing, because they need an unlocked Mac screen.
+
 **This runbook is written for a FIRST PUBLISH** — a repository with zero commits and no remote.
 Step 0 checks that assumption before anything else, because if someone has already committed and
 pushed, several steps below would be wrong.
