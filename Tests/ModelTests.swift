@@ -4,11 +4,12 @@ private let slackPath = "/Applications/Slack.app"
 
 func runModelTests() {
     suite("model/resolution") {
-        let slack = RingItem.make(path: "/Applications/Slack.app")
-        expectEqual(slack.isMissing, false, "an installed app is not missing")
-        expectEqual(slack.name, "Slack", "the display name drops the .app extension")
-        expectEqual(slack.path, "/Applications/Slack.app", "the path round-trips")
-        expect(slack.icon.size.width > 0, "an installed app has a real icon")
+        // Safari ships with every Mac, so this holds on a clean CI runner too.
+        let safari = RingItem.make(path: "/Applications/Safari.app")
+        expectEqual(safari.isMissing, false, "an installed app is not missing")
+        expectEqual(safari.name, "Safari", "the display name drops the .app extension")
+        expectEqual(safari.path, "/Applications/Safari.app", "the path round-trips")
+        expect(safari.icon.size.width > 0, "an installed app has a real icon")
 
         // A localised system app keeps its Finder-visible name.
         let settings = RingItem.make(path: "/System/Applications/System Settings.app")
@@ -161,7 +162,7 @@ func runModelTests() {
     }
 
     suite("model/boot-volume") {
-        expectEqual(RingItem.isOnBootVolume(URL(fileURLWithPath: "/Applications/Slack.app")),
+        expectEqual(RingItem.isOnBootVolume(URL(fileURLWithPath: "/Applications/Safari.app")),
                     true, "an app in /Applications is on the boot volume")
         expectEqual(RingItem.isOnBootVolume(URL(fileURLWithPath: "/System/Applications/System Settings.app")),
                     true, "a system app is on the boot volume")
@@ -171,10 +172,10 @@ func runModelTests() {
     }
 
     suite("model/dominant-colour") {
-        // Slack's icon is strongly coloured, so the extractor must not fall back
+        // Music's icon is strongly coloured, so the extractor must not fall back
         // to grey. Exact values are not asserted; saturation is the property
         // that matters for a halo to look like the app it belongs to.
-        let icon = RingItem.make(path: "/Applications/Slack.app").icon
+        let icon = RingItem.make(path: "/System/Applications/Music.app").icon
         let colour = RingItem.dominantColor(of: icon)
         expectClose(colour.alphaComponent, 1, "the halo colour is opaque")
         if let rgb = colour.usingColorSpace(.deviceRGB) {
