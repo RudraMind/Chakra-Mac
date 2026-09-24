@@ -21,6 +21,9 @@ swiftc \
   Sources/OuterRing.swift \
   Sources/Recents.swift \
   Sources/Proposal.swift \
+  Sources/Shelf.swift \
+  Sources/ShelfName.swift \
+  Sources/ShelfIntake.swift \
   Sources/WheelView.swift \
   Sources/OrbView.swift \
   Sources/OrbController.swift \
